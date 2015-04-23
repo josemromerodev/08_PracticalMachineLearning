@@ -1,0 +1,135 @@
+---
+title: "PredictionAssignment"
+author: "Jose M. Romero"
+date: "April 22, 2015"
+output: html_document
+---
+
+## Objective
+For this project we will take excersize activity data from six participants to determine **how well** a participant did the excersize. We will analyze data taken from accelerometers positioned on the belt, forearm, arm and dumbell of six young health participants who were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: 
+
+- Exactly according to the specification (Class A)
+- Throwing the elbows to the front (Class B)
+- Lifting the dumbbell only halfway (Class C)
+- Lowering the dumbbell only halfway (Class D)
+- Throwing the hips to the front (Class E)
+
+**The goal is to predict the manner in which each participant did the exercise.**
+
+The data for this project come from this source: <http://groupware.les.inf.puc-rio.br/har> which was used for this paper:
+
+> Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. [Qualitative Activity Recognition of Weight Lifting Exercises](http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201). Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+## Loading the Data
+```{r}
+pml_training <- read.table("data/pml-training.csv", header=TRUE, sep=",")[,-1]
+pml_testing <- read.table("data/pml-testing.csv", header=TRUE, sep=",")[,-1]
+```
+
+From now on we will only use the training data since we will need testing data for programming assignment.
+
+## Predictive Model
+
+We start by loading all necessary packages
+
+```{r, message=FALSE}
+library(lattice)
+library(ggplot2)
+library(caret)
+library(rpart)
+library(randomForest)
+library(MASS)
+library(rattle)
+```
+
+Set the default seed
+```{r}
+set.seed(1234567890)
+```
+
+We now divide the training data into training and testing for cross validation later
+
+```{r}
+inTrain <- createDataPartition(y=pml_training$classe, p=0.7, list=FALSE)
+training <- pml_training[inTrain,]
+testing <- pml_training[-inTrain,]
+```
+
+### Clean up data
+
+Clean the data by removing all columns with near zero variation
+
+```{r}
+nzv <- nearZeroVar(training)
+trainingNZV <- training[,-nzv]
+testingNZV <- testing[,-nzv]
+
+# Remove all timestamp information, since this should not be an outcome
+timestampColumns <- grep("timestamp", names(trainingNZV))
+trainingNZV <- trainingNZV[,-timestampColumns]
+testingNZV <- testingNZV[,-timestampColumns]
+
+# Remove columns with more than 90% NAs
+trainingNZV <- trainingNZV[ lapply( trainingNZV, function(x) sum(is.na(x)) / length(x) ) < 0.9 ]
+```
+
+## Predition Models - RPart
+
+We use RPart to generate a model for our data
+
+```{r}
+RPartModFit <- rpart(classe ~ ., data=trainingNZV, method="class")
+```
+
+Let's see how this classification tree looks like:
+
+```{r}
+fancyRpartPlot(RPartModFit)
+```
+
+To see if this model works, we do cross validation by running a prediction against our test data
+
+```{r}
+RPartPred <- predict(RPartModFit, testingNZV, type = "class")
+RPartCM <- confusionMatrix(RPartPred, testing$classe)
+RPartCM
+```
+
+The accuracy of RPart was only `r trunc(RPartCM$overall[1]*100)`%, so we will try Random Forest:
+
+```{r}
+RFmodFit <- randomForest(classe ~. , data=trainingNZV, na.action = na.omit)
+```
+
+To see if this model works, we do cross validation by running a prediction against our test data
+
+```{r}
+RFpred <- predict(RFmodFit, testingNZV, type = "class")
+RFCM <- confusionMatrix(RFpred, testing$classe)
+RFCM
+```
+
+The accuracy of Random Forest was **`r trunc(RFCM$overall[1]*100)`%**. So this model provides the best preditions.
+
+# Programming Assignment Submission
+
+We now use the test set we have not touched with the Random Forests model for preditions
+
+```{r}
+test_set_predictions <- predict(RFmodFit, pml_testing, type = "class")
+```
+
+And we use the code provided for the programming submission to submit our results:
+
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(test_set_predictions)
+```
+
